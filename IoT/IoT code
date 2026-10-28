@@ -1,0 +1,107 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <DHT.h>
+
+const char* ssid = "TEN_WIFI";
+const char* password = "MAT_KHAU_WIFI";
+
+const char* mqtt_server = "broker.hivemq.com";  
+const int mqtt_port = 1883;
+
+const char* device_code = "ESP32_ROOM1_01";
+
+char topic_data[60];   
+char topic_alert[60];  
+
+#define DHTPIN 4
+#define DHTTYPE DHT22  
+DHT dht(DHTPIN, DHTTYPE);
+
+float tempMax = 28.0;  
+float tempMin = 18.0;  
+float humMax = 95.0;   
+float humMin = 80.0;   
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void connectWiFi() {
+  Serial.print("Dang ket noi WiFi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("Da ket noi WiFi!");
+}
+
+void connectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Dang ket noi MQTT...");
+    if (client.connect(device_code)) {
+      Serial.println("OK");
+    } else {
+      Serial.print("loi, ma loi = ");
+      Serial.println(client.state());
+      delay(3000);  
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  sprintf(topic_data, "farm/%s/sensors", device_code);
+  sprintf(topic_alert, "farm/%s/alerts", device_code);
+
+  connectWiFi();
+  client.setServer(mqtt_server, mqtt_port);
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
+  if (!client.connected()) {
+    connectMQTT();
+  }
+  client.loop();
+
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Loi: khong doc duoc DHT22!");
+    client.publish(topic_alert, "Loi cam bien DHT22");
+    delay(5000);
+    return;
+  }
+
+  Serial.print("Nhiet do: ");
+  Serial.print(temp);
+  Serial.print(" C | Do am: ");
+  Serial.print(hum);
+  Serial.println(" %");
+
+  char msg[150];
+  sprintf(msg, "{\"device_code\":\"%s\",\"temperature\":%.1f,\"humidity\":%.1f}",
+          device_code, temp, hum);
+  client.publish(topic_data, msg);
+
+  if (temp > tempMax) {
+    client.publish(topic_alert, "Nhiet do qua cao!");
+  }
+  if (temp < tempMin) {
+    client.publish(topic_alert, "Nhiet do qua thap!");
+  }
+  if (hum > humMax) {
+    client.publish(topic_alert, "Do am qua cao!");
+  }
+  if (hum < humMin) {
+    client.publish(topic_alert, "Do am qua thap!");
+  }
+
+  delay(5000);  
+}
